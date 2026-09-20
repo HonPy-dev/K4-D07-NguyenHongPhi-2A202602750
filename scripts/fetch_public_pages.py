@@ -82,6 +82,10 @@ def slugify(value: str) -> str:
 
 
 def yaml_value(value: str) -> str:
+    # Quote only when required: the checkpoint script in the lab handout greps
+    # bare values (doc_id must equal the filename stem, no surrounding quotes).
+    if re.match(r"^[A-Za-z0-9][A-Za-z0-9 .,'&()/:+-]*$", value) and not value.endswith(" "):
+        return value
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
@@ -108,7 +112,13 @@ def robots_allowed(url: str, user_agent: str) -> bool:
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
     parser = RobotFileParser(robots_url)
     try:
-        parser.read()
+        # Fetch robots.txt with the same User-Agent as page requests: sites may
+        # 403 the default Python-urllib UA, which RobotFileParser treats as
+        # "disallow everything" even when robots.txt itself allows crawling.
+        request = Request(robots_url, headers={"User-Agent": user_agent})
+        with urlopen(request, timeout=20) as response:
+            charset = response.headers.get_content_charset() or "utf-8"
+            parser.parse(response.read().decode(charset, errors="replace").splitlines())
     except (HTTPError, URLError, OSError) as error:
         print(f"Skipping {url}: cannot verify {robots_url} ({error})", file=sys.stderr)
         return False
